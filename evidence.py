@@ -114,18 +114,42 @@ def capture_onion(post_url, dest):
     try:
         import sicry
     except Exception:
-        return "sicry.py introuvable — capture .onion ignorée"
+        return "sicry.py introuvable — capture .onion ignorée", ""
     try:
         res = sicry.fetch(post_url)
     except Exception as e:
-        return f"échec fetch Tor ({type(e).__name__}) — Tor lancé ?"
+        return f"échec fetch Tor ({type(e).__name__}) — Tor lancé ?", ""
     if res.get("error"):
-        return f"post injoignable (status {res.get('status', 0)}) — hidden service offline ?"
+        return f"post injoignable (status {res.get('status', 0)}) — hidden service offline ?", ""
+    text = res.get("text", "")
     with open(dest, "w") as f:
         f.write(f"URL: {post_url}\nTITLE: {res.get('title','')}\nSTATUS: {res.get('status')}\n")
         f.write("-" * 60 + "\n")
-        f.write(res.get("text", ""))
-    return None
+        f.write(text)
+    return None, text
+
+
+# ── propagation identifiers (attacker-published, no download) ──────
+_RE_MAGNET  = re.compile(r"magnet:\?[^\s\"'<>]+", re.I)
+_RE_BTIH    = re.compile(r"urn:btih:([a-z0-9]{32,40})", re.I)
+_RE_HASH    = re.compile(r"(?i)\b(sha-?256|sha-?1|md5)\b[\s:=]*([a-f0-9]{32,64})")
+_RE_FILE    = re.compile(r"(?im)^.*?[\w.\-/\\ ]+\.(?:sql|zip|rar|7z|tar|gz|tgz|csv|bak|db|mdb|accdb|xlsx?|pst|dump)\b.*$")
+_RE_TORRENT = re.compile(r"\b\S+\.torrent\b", re.I)
+
+
+def extract_propagation_ids(text):
+    """Extract file-tracking identifiers the ATTACKER published (magnet/infohash,
+    posted hashes, file listing). These let you search for the same dump elsewhere
+    WITHOUT downloading any stolen data."""
+    text = text or ""
+    return {
+        "magnets":         sorted(set(_RE_MAGNET.findall(text))),
+        "infohashes":      sorted({m.group(1).lower() for m in _RE_BTIH.finditer(text)}),
+        "published_hashes": sorted({f"{m.group(1).lower()}:{m.group(2).lower()}"
+                                    for m in _RE_HASH.finditer(text)}),
+        "listed_files":    sorted({l.strip()[:200] for l in _RE_FILE.findall(text) if l.strip()})[:50],
+        "torrent_files":   sorted(set(_RE_TORRENT.findall(text))),
+    }
 
 
 def rfc3161_timestamp(manifest_path, out_tsr):
@@ -150,7 +174,7 @@ def rfc3161_timestamp(manifest_path, out_tsr):
 
 
 # ── dossier ───────────────────────────────────────────────────────
-def write_dossier(path, rec, folder, captured_at, artifacts, ts_status, onion_status):
+def write_dossier(path, rec, folder, captured_at, artifacts, ts_status, onion_status, propagation):
     def g(k):
         return rec.get(k) or "—"
     tool = f"OnionClaw Watch evidence {VERSION} · Python {platform.python_version()} · {platform.platform()}"
@@ -204,6 +228,30 @@ def write_dossier(path, rec, folder, captured_at, artifacts, ts_status, onion_st
     ]
     if onion_status is not None:
         lines.append(f"> Note capture .onion : {onion_status}\n")
+    lines += [
+        "## Identifiants de propagation (traçage inter-sites)",
+        "",
+        "> Identifiants **publiés par l'attaquant** — permettent de rechercher le même dump "
+        "ailleurs (DHT torrent, sites d'index) **sans le télécharger**. Aucune donnée volée récupérée.",
+        "",
+    ]
+    _labels = [("magnets", "Magnet"), ("infohashes", "Infohash torrent (btih)"),
+               ("published_hashes", "Hashes publiés par l'attaquant"),
+               ("torrent_files", "Fichiers .torrent"), ("listed_files", "Fichiers listés")]
+    if any(propagation.values()):
+        for key, label in _labels:
+            vals = propagation.get(key) or []
+            if vals:
+                lines.append(f"- **{label}** ({len(vals)}) :")
+                lines += [f"  - `{v}`" for v in vals[:20]]
+                if len(vals) > 20:
+                    lines.append(f"  - … (+{len(vals) - 20}) — voir `propagation.json`")
+        lines.append("")
+    else:
+        lines.append("- Aucun identifiant extrait "
+                      + ("(post `.onion` non capturé — relancer avec `--onion` + Tor)."
+                         if not onion_status or "ignoré" in str(onion_status) or "offline" in str(onion_status)
+                         or "Tor" in str(onion_status) else "(rien de publié dans le post).") + "\n")
     lines += [
         "## Valeur probante & cadre légal",
         "",
@@ -279,16 +327,25 @@ def main():
 
     # optional live .onion capture
     onion_status = None
+    onion_text = ""
     if args.onion:
         pu = rec.get("post_url") or ""
         if ".onion" in pu:
-            onion_status = capture_onion(pu, os.path.join(folder, "onion_post.txt"))
+            onion_status, onion_text = capture_onion(pu, os.path.join(folder, "onion_post.txt"))
             if onion_status is None:
                 artifacts_files.append("onion_post.txt")
             else:
                 print(f"⚠ capture .onion : {onion_status}", file=sys.stderr)
         else:
             onion_status = "pas d'URL .onion dans l'enregistrement"
+
+    # propagation identifiers (attacker-published; no stolen data downloaded)
+    propagation = extract_propagation_ids(
+        "\n".join([str(rec.get("description") or ""), onion_text]))
+    if any(propagation.values()):
+        with open(os.path.join(folder, "propagation.json"), "w") as f:
+            json.dump(propagation, f, indent=2, ensure_ascii=False)
+        artifacts_files.append("propagation.json")
 
     # manifest
     manifest_path = os.path.join(folder, "MANIFEST.sha256")
@@ -309,7 +366,7 @@ def main():
             print(f"⚠ {ts_status}", file=sys.stderr)
 
     write_dossier(os.path.join(folder, "dossier.md"), rec, folder, captured_at,
-                  artifacts, ts_status if args.timestamp else "non demandé", onion_status)
+                  artifacts, ts_status if args.timestamp else "non demandé", onion_status, propagation)
 
     print(f"✓ Dossier de preuve : {folder}")
     for fn, h in artifacts:
