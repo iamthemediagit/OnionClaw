@@ -5,6 +5,7 @@
 clients.json
 .watch_state.json
 .hudson_state.json
+evidence/
 
 # Python
 __pycache__/
