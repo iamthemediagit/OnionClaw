@@ -1,0 +1,16 @@
+{
+  "clients": [
+    {
+      "name": "ACME Industrie",
+      "names": ["ACME", "ACME Industrie", "ACME Group"],
+      "domains": ["acme-industrie.fr", "acme.com"],
+      "alert_email": "rssi@acme-industrie.fr"
+    },
+    {
+      "name": "Beta Logistics",
+      "names": ["Beta Logistics", "BetaLog"],
+      "domains": ["betalogistics.eu"],
+      "alert_email": "security@betalogistics.eu"
+    }
+  ]
+}

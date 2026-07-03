@@ -1,6 +1,11 @@
 # Secrets
 .env
 
+# OnionClaw Watch — client data & runtime state (RGPD: never commit)
+clients.json
+.watch_state.json
+.hudson_state.json
+
 # Python
 __pycache__/
 *.pyc
