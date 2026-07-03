@@ -129,6 +129,39 @@ def capture_onion(post_url, dest):
     return None, text
 
 
+def capture_onion_js(post_url, dest, shot_dest):
+    """Render the .onion post with headless Chromium via Tor (SOCKS5) so that
+    JavaScript-rendered leak sites yield real text + a full-page screenshot.
+    Returns ('__NO_JS__','') if Playwright is unavailable (caller falls back to
+    the static fetch)."""
+    try:
+        from playwright.sync_api import sync_playwright
+    except Exception:
+        return "__NO_JS__", ""
+    socks = f"socks5://{os.environ.get('TOR_SOCKS_HOST','127.0.0.1')}:{os.environ.get('TOR_SOCKS_PORT','9050')}"
+    text = ""
+    try:
+        with sync_playwright() as pw:
+            browser = pw.chromium.launch(headless=True, proxy={"server": socks},
+                                         args=["--no-sandbox", "--disable-dev-shm-usage"])
+            page = browser.new_page()
+            page.goto(post_url, wait_until="load", timeout=60000)
+            page.wait_for_timeout(4000)
+            text = page.inner_text("body")
+            try:
+                page.screenshot(path=shot_dest, full_page=True)
+            except Exception:
+                pass
+            browser.close()
+    except Exception as e:
+        return f"rendu JS échoué ({type(e).__name__}) — Tor lancé / site en ligne ?", ""
+    with open(dest, "w") as f:
+        f.write(f"URL: {post_url}\n(rendu: Playwright/Chromium via Tor)\n")
+        f.write("-" * 60 + "\n")
+        f.write(text)
+    return None, text
+
+
 # ── propagation identifiers (attacker-published, no download) ──────
 _RE_MAGNET  = re.compile(r"magnet:\?[^\s\"'<>]+", re.I)
 _RE_BTIH    = re.compile(r"urn:btih:([a-z0-9]{32,40})", re.I)
@@ -331,9 +364,17 @@ def main():
     if args.onion:
         pu = rec.get("post_url") or ""
         if ".onion" in pu:
-            onion_status, onion_text = capture_onion(pu, os.path.join(folder, "onion_post.txt"))
+            post_path = os.path.join(folder, "onion_post.txt")
+            render_path = os.path.join(folder, "onion_render.png")
+            onion_status, onion_text = capture_onion_js(pu, post_path, render_path)
+            if onion_status is not None:  # Playwright missing or render failed → static fallback
+                fb_status, fb_text = capture_onion(pu, post_path)
+                if fb_status is None:
+                    onion_status, onion_text = None, fb_text
             if onion_status is None:
                 artifacts_files.append("onion_post.txt")
+                if os.path.exists(render_path):
+                    artifacts_files.append("onion_render.png")
             else:
                 print(f"⚠ capture .onion : {onion_status}", file=sys.stderr)
         else:
