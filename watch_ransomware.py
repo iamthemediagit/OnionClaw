@@ -47,8 +47,12 @@ HTTP_TIMEOUT = int(os.environ.get("WATCH_HTTP_TIMEOUT", "30"))
 
 
 # ── data acquisition ──────────────────────────────────────────────
-def fetch_recent_victims():
+def fetch_recent_victims(country=None):
     """Pull recently disclosed ransomware victims from the aggregator.
+
+    country: optional ISO 3166-1 alpha-2 code (e.g. "FR"). When set, uses the
+    country-scoped search feed instead of the global recent feed — useful for a
+    market-focused watch (e.g. FR SMBs).
 
     ransomware.live now requires a free API key (X-API-KEY header).
     Register one at https://www.ransomware.live/ and set RANSOMWARE_LIVE_API_KEY.
@@ -57,9 +61,14 @@ def fetch_recent_victims():
         raise RuntimeError(
             "RANSOMWARE_LIVE_API_KEY missing. Get a free key at "
             "https://www.ransomware.live/ and add it to .env")
-    url = f"{API_BASE}/victims/recent"
+    if country:
+        url = f"{API_BASE}/victims/search"
+        params = {"country": country.upper(), "order": "discovered"}
+    else:
+        url = f"{API_BASE}/victims/recent"
+        params = {"order": "discovered"}
     r = requests.get(url, timeout=HTTP_TIMEOUT,
-                     params={"order": "discovered"},
+                     params=params,
                      headers={"User-Agent": "OnionClaw-Watch/0.1",
                               "X-API-KEY": API_KEY})
     if r.status_code in (401, 403):
@@ -178,6 +187,8 @@ def main():
     p.add_argument("--json", action="store_true", help="Output raw JSON only")
     p.add_argument("--no-state", action="store_true",
                    help="Ignore dedup state (re-alert everything)")
+    p.add_argument("--country", default=None,
+                   help="Scope feed to an ISO country code (e.g. FR) via /victims/search")
     args = p.parse_args()
 
     try:
@@ -188,7 +199,7 @@ def main():
         sys.exit(1)
 
     try:
-        victims = fetch_recent_victims()
+        victims = fetch_recent_victims(args.country)
     except Exception as e:
         print(f"ERROR: ransomware.live fetch failed: {e}", file=sys.stderr)
         sys.exit(1)
@@ -213,7 +224,7 @@ def main():
                 "victim": v.get("post_title") or v.get("victim"),
                 "group": v.get("group_name") or v.get("group"),
                 "discovered": v.get("discovered") or v.get("published"),
-                "source": v.get("post_url") or v.get("url"),
+                "source": v.get("post_url") or v.get("permalink") or v.get("url"),
                 "country": v.get("country"),
                 "activity": v.get("activity"),
                 "alert_email": client.get("alert_email"),
