@@ -23,6 +23,7 @@
 - [ ] **Dédup robuste** — **Done :** MinHash LSH + hash SHA-256 (au-delà du state file JSON actuel). · **Dép :** matching
 - [ ] **Alerting** — **Done :** email fait ; ajouter webhook. · **Fait (email) :** `watch_ransomware.py`
 - [ ] **Scheduler récurrent** — **Done :** cron OK pour MVP ; industrialiser via `pipeline.py` watch (`--interval`/`--daemon-poll`). · **Dép :** connecteurs
+- [x] **Outil de découverte / prospection** — **Done :** listing des dernières fuites entreprises (filtres pays/secteur/groupe, table/json/csv), FR par défaut. · **Fait :** `list_leaks.py`
 - [ ] **Investigation `.onion` à la demande** — **Done :** appel OnionClaw (`pipeline.py`) + sortie STIX/MISP intégrée au rapport. · **Dép :** —
 - [ ] **Audit trail (PG)** — **Done :** table audit (recherche/match/suppression : qui/quand/quoi). · **Dép :** modèle actifs
 - [ ] **Purge post-notification** — **Done :** job planifié appliquant la politique de rétention. · **Dép :** politique rétention (Lot 0)
